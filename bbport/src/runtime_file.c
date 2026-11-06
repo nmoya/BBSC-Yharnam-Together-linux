@@ -651,14 +651,20 @@ static ssize_t host_write(int h,const void *buffer,uint64_t size) { return write
 #endif
 /* The GPU side is told of the write first (runtime_memory_note_write: its tracking unprotects the
  * range). Pages protected again meanwhile would make the kernel's copy fail with EFAULT instead
- * of faulting to our handler: a user-mode write to each page first goes through the handler. */
-static void touch_for_write(void *buffer,uint64_t size) {
-    if (!size) return;
+ * of faulting to our handler: a user-mode write to each guest page first goes through the handler.
+ * An invalid or read-only guest destination must return EFAULT, not fault in this host runtime. */
+static int touch_for_write(void *buffer,uint64_t size) {
+    if (!size) return 1;
     uintptr_t p=(uintptr_t)buffer & ~(uintptr_t)4095, end=(uintptr_t)buffer+size;
     for (; p<end; p+=4096) {
-        volatile unsigned char *b=(volatile unsigned char *)(p<(uintptr_t)buffer ? (uintptr_t)buffer : p);
+        const uintptr_t at=p<(uintptr_t)buffer ? (uintptr_t)buffer : p;
+        uint32_t prot=0;
+        if (!runtime_memory_protection(at,NULL,NULL,&prot)) continue; /* host buffer: kernel checks it */
+        if (!(prot & 0x22)) return 0; /* guest destination cannot be written */
+        volatile unsigned char *b=(volatile unsigned char *)at;
         *b=*b;
     }
+    return 1;
 }
 /* A page protected again between the touch and the kernel's copy (the GPU side re-arms its write
  * traps): EFAULT with nothing read. Touched again, the read is tried again a few times. */
@@ -672,7 +678,7 @@ static ssize_t read_retrying(int h,void *buffer,uint64_t size,int64_t offset,int
 #else
         if (n>=0 || errno!=EFAULT) break;
 #endif
-        touch_for_write(buffer,size);
+        if (!touch_for_write(buffer,size)) { errno=EFAULT; return -1; }
     }
     return n;
 }
@@ -680,7 +686,7 @@ static int64_t do_read(int fd,void *buffer,uint64_t size) {
     int h=host_fd(fd);
     if (h<0) return -EBADF;
     runtime_memory_note_write((uintptr_t)buffer,size);
-    touch_for_write(buffer,size);
+    if (!touch_for_write(buffer,size)) return -EFAULT;
     ssize_t n=read_retrying(h,buffer,size,0,0);
     if (n<0) { if (audio_trace()) printf("Audio trace: read(fd %d, %llu) failed, errno %d\n",fd,(unsigned long long)size,errno); return -errno; }
     if (n>0) runtime_memory_note_write((uintptr_t)buffer,(uint64_t)n); /* and once the data is there */
@@ -691,7 +697,7 @@ static int64_t do_pread(int fd,void *buffer,uint64_t size,int64_t offset) {
     int h=host_fd(fd);
     if (h<0) return -EBADF;
     runtime_memory_note_write((uintptr_t)buffer,size);
-    touch_for_write(buffer,size);
+    if (!touch_for_write(buffer,size)) return -EFAULT;
     ssize_t n=read_retrying(h,buffer,size,offset,1);
     if (n<0) { if (audio_trace()) printf("Audio trace: pread(fd %d, %llu @%lld) failed, errno %d\n",fd,(unsigned long long)size,(long long)offset,errno); return -errno; }
     if (n>0) runtime_memory_note_write((uintptr_t)buffer,(uint64_t)n); /* and once the data is there */
@@ -957,4 +963,3 @@ void runtime_file_report(void) {
     printf("Runtime: files opened=%zu, reads=%zu (%llu bytes), writes=%zu, not found=%zu\n",
            opens,reads,(unsigned long long)bytes_read,writes,missing);
 }
-

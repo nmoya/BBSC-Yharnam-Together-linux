@@ -1,6 +1,9 @@
 /* Exercise actual guest file operations on a linked overlay and writable saves. */
 #include "../src/runtime_file.c"
 #include <assert.h>
+#ifndef _WIN32
+#include <sys/mman.h>
+#endif
 static int32_t guest_errno;
 int32_t *runtime_errno(void) { return &guest_errno; }
 int32_t runtime_guest_errno(int e) { return e; }
@@ -9,6 +12,13 @@ static char opened[256];
 void bbcoop_file_opened(const char *guest_path) { snprintf(opened,sizeof(opened),"%s",guest_path); }
 /* Reads into guest memory tell the GPU side (runtime_memory.c); nothing to tell here. */
 void runtime_memory_note_write(uintptr_t address, uint64_t size) { (void)address; (void)size; }
+static uintptr_t read_only_guest;
+int runtime_memory_protection(uintptr_t address, uintptr_t *start, uintptr_t *end, uint32_t *prot) {
+    (void)start; (void)end;
+    if ((address & ~(uintptr_t)4095)!=read_only_guest) return 0;
+    *prot=0x11; /* guest read only */
+    return 1;
+}
 uintptr_t runtime_lookup(const RuntimeExport *table,size_t n,const char *name) {
     for (size_t i=0;i<n;++i) if (!strcmp(table[i].name,name)) return (uintptr_t)table[i].function;
     return 0;
@@ -29,6 +39,14 @@ int main(void) {
         const char *path=i==0 ? "/app0/asset.dcx" : i==1 ? "/hostapp/asset.dcx" : "asset.dcx";
         int fd=(int)do_open(path,0,0); assert(fd>=3);
         char content[8]={0}; assert(do_read(fd,content,6)==6 && !strcmp(content,"modded"));
+#ifndef _WIN32
+        void *readonly=mmap(NULL,4096,PROT_READ,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);
+        assert(readonly!=MAP_FAILED);
+        read_only_guest=(uintptr_t)readonly;
+        assert(do_pread(fd,readonly,6,0)==-EFAULT); /* never SIGSEGV in touch_for_write */
+        read_only_guest=0;
+        assert(!munmap(readonly,4096));
+#endif
         GuestStat info; assert(!do_stat(path,&info) && info.size==6);
         assert(!do_close(fd));
         assert(do_open(path,2,0)==-EROFS);

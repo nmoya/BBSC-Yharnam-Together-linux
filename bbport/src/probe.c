@@ -464,6 +464,17 @@ static void apply_patches(const char *path, Segment *segments, uint64_t ns, cons
             if (value<base || !mapped(segments,ns,value-base,1)) fail("patch writes a pointer outside the image");
             slots[nslots++]=target;
         }
+        /* bbgpu_init may install a guest code hook before this point. Its mprotect restores
+         * that page to RX, even though the loader has not finished applying game patches.
+         * Reopen only executable patch pages; the segment protections are finalized below. */
+        for (uint64_t s=0;s<ns;++s) {
+            const uint64_t end=segments[s].address+segments[s].size;
+            if (!(segments[s].flags&1) || offset<segments[s].address ||
+                offset>=((end+page_size-1)&~(uint64_t)(page_size-1))) continue;
+            const uint64_t first=offset&~(uint64_t)(page_size-1);
+            protect(image+first,round_page(offset-first+length),7);
+            break;
+        }
         memcpy(image+offset,data,length);
         for (size_t s=0;s<nslots;++s) {
             uint64_t value;

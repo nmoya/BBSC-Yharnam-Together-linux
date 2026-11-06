@@ -337,8 +337,9 @@ void runtime_thread_cpu_report(void) {
     const long ticks=sysconf(_SC_CLK_TCK);
     for (struct dirent *e; (e=readdir(tasks)) && count<MaxThreads;) {
         if (e->d_name[0]<'0' || e->d_name[0]>'9') continue;
+        if (strlen(e->d_name)>20) continue; /* a thread id fits in 20 decimal digits */
         char path[64], line[512];
-        snprintf(path,sizeof(path),"/proc/self/task/%s/stat",e->d_name);
+        snprintf(path,sizeof(path),"/proc/self/task/%.*s/stat",20,e->d_name);
         FILE *f=fopen(path,"r");
         if (!f) continue;
         const char *got=fgets(line,sizeof(line),f);
@@ -350,7 +351,7 @@ void runtime_thread_cpu_report(void) {
         t->id=strtoul(e->d_name,NULL,10);
         t->cpu_ns=(utime+stime)*(1000000000u/(uint64_t)ticks);
         t->name[0]=0;
-        snprintf(path,sizeof(path),"/proc/self/task/%s/comm",e->d_name);
+        snprintf(path,sizeof(path),"/proc/self/task/%.*s/comm",20,e->d_name);
         if ((f=fopen(path,"r"))) {
             if (fgets(t->name,sizeof(t->name),f)) t->name[strcspn(t->name,"\n")]=0;
             fclose(f);
@@ -571,4 +572,3 @@ void runtime_thread_report(void) {
     printf("Runtime: guest threads created=%zu, exited=%zu, joined=%zu\n",created,exited,joined_count);
     pthread_mutex_unlock(&lock);
 }
-

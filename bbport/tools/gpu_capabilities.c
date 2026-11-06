@@ -512,10 +512,16 @@ static int upscalers_mode(void) {
     VkPhysicalDeviceProperties props;
     vkGetPhysicalDeviceProperties(device, &props);
 
+#ifdef VK_VALVE_SHADER_MIXED_FLOAT_DOT_PRODUCT_EXTENSION_NAME
     VkPhysicalDeviceShaderMixedFloatDotProductFeaturesVALVE mixed = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_MIXED_FLOAT_DOT_PRODUCT_FEATURES_VALVE};
+#endif
     VkPhysicalDeviceCooperativeMatrixFeaturesKHR matrix = {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR, .pNext = &mixed};
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR,
+#ifdef VK_VALVE_SHADER_MIXED_FLOAT_DOT_PRODUCT_EXTENSION_NAME
+        .pNext = &mixed
+#endif
+    };
     VkPhysicalDeviceComputeShaderDerivativesFeaturesKHR derivatives = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR, .pNext = &matrix};
     VkPhysicalDeviceVulkan13Features vk13 = {
@@ -532,8 +538,12 @@ static int upscalers_mode(void) {
     const int derivatives_ok = has_extension(device, "VK_KHR_compute_shader_derivatives") &&
                                derivatives.computeDerivativeGroupLinear;
     const int matrix_ok = has_extension(device, "VK_KHR_cooperative_matrix") && matrix.cooperativeMatrix;
+#ifdef VK_VALVE_SHADER_MIXED_FLOAT_DOT_PRODUCT_EXTENSION_NAME
     const int mixed_ok = has_extension(device, "VK_VALVE_shader_mixed_float_dot_product") &&
                          mixed.shaderMixedFloatDotProductFloat16AccFloat32;
+#else
+    const int mixed_ok = 0;
+#endif
 
     UpscalerVerdict fsr3, fsr4, fsr411, dlss, xess;
     pass(&fsr3);

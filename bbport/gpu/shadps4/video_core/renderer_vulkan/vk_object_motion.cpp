@@ -190,7 +190,7 @@ void ObjectMotion::CreateDescriptorSet() {
         .pSetLayouts = &layout,
     }))[0];
     for (u32 i = 0; i < 3; ++i) {
-        infos[i] = {buffers[i], 0, VK_WHOLE_SIZE};
+        infos[i] = vk::DescriptorBufferInfo{buffers[i], 0, VK_WHOLE_SIZE};
         writes[i] = {
             .dstSet = set,
             .dstBinding = bindings[i],

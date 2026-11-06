@@ -75,7 +75,25 @@ for patch in gpu/patches/fsr-vulkan/*.patch; do
         git -C gpu/third_party/fsr-vulkan apply "$PWD/$patch"
     fi
 done
-cmake -S gpu -B out/gpu -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBB_PGO="$pgo" \
+# A Nix shell switch can leave absolute compiler, SDL and protobuf paths in CMakeCache.txt.
+# Refresh CMake's configuration, not its objects, before mixing incompatible store versions.
+cmake_refresh=()
+if [[ -f out/gpu/CMakeCache.txt ]]; then
+    cached_cc=$(sed -n 's/^CMAKE_C_COMPILER:[^=]*=//p' out/gpu/CMakeCache.txt)
+    cached_sdl=$(sed -n 's/^SDL3_LIBDIR:INTERNAL=//p' out/gpu/CMakeCache.txt)
+    cached_protobuf=$(sed -n 's/^Protobuf_DIR:PATH=//p' out/gpu/CMakeCache.txt)
+    current_sdl=$(pkg-config --variable=libdir sdl3)
+    current_protobuf=$(pkg-config --variable=prefix protobuf)
+    current_cc=$(command -v "$CC")
+    if { [[ -n $cached_cc && ${cached_cc%/bin/*} != "${current_cc%/bin/*}" ]] ||
+         [[ -n $cached_sdl && $cached_sdl != "$current_sdl" ]] ||
+         [[ -n $cached_protobuf && $cached_protobuf != "$current_protobuf"/lib/cmake/protobuf &&
+            $cached_protobuf != "$current_protobuf"/lib64/cmake/protobuf ]]; }; then
+        echo 'Nix build dependencies changed; refreshing CMake configuration.'
+        cmake_refresh=(--fresh)
+    fi
+fi
+cmake "${cmake_refresh[@]}" -S gpu -B out/gpu -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBB_PGO="$pgo" \
     -DBB_LTO="${BB_LTO:-ON}" -DBB_PGO_DIR="$PWD/pgo" -DBB_PRODUCTION="$production" >/dev/null
 echo "GPU library: PGO $pgo, LTO ${BB_LTO:-ON}"
 # A failed GPU build must stop here: an older libbbgpu.so would otherwise be used silently.
@@ -115,11 +133,11 @@ if [[ ${1:-} == --test ]]; then
     out/pad-test
     "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -UNDEBUG -pthread "${includes[@]}" -I. -Isrc tests/test_mouse_camera.c -lm "${libraries[@]}" -o out/mouse-camera-test
     out/mouse-camera-test
-    "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -pthread -I. -Isrc tests/test_runtime.c "${runtime[@]}" out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -o out/runtime-test
+    "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -pthread -no-pie -I. -Isrc tests/test_runtime.c "${runtime[@]}" out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -o out/runtime-test
     out/runtime-test
     "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -pthread -I. -Isrc tests/test_file_mods.c -o out/file-mods-test
     out/file-mods-test
-    "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -pthread -I. -Isrc tests/test_sema.c "${runtime[@]}" out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -o out/sema-test
+    "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -pthread -no-pie -I. -Isrc tests/test_sema.c "${runtime[@]}" out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -o out/sema-test
     out/sema-test
     "$CC" -std=c11 -D_GNU_SOURCE -O2 -g -Wall -Wextra -Werror -I. -Isrc tests/test_content.c src/runtime_content.c -o out/content-test
     out/content-test

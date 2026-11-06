@@ -1,2 +1,7 @@
 __pycache__/
 *.pyc
+/local-data/
+# Older server launches without SHADNET_HOME can write private data in the repo root.
+/db/
+/link_key.bin
+/shadnet.cfg

@@ -130,7 +130,7 @@ void HdrOutputPass::Destroy() {
     DestroyImage(game);
     DestroyImage(overlay);
     DestroyImage(gain);
-    extent = {};
+    extent = vk::Extent2D{};
 }
 
 HdrOutputPass::Image HdrOutputPass::MakeImage(vk::Extent2D size, vk::Format format,

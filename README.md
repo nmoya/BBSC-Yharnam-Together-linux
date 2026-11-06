@@ -40,13 +40,14 @@ expect rough edges and keep backups of your saves. New builds come out as GitHub
 ## Contents
 
 1. [What it does](#what-it-does)
-2. [Play it](#play-it)
-3. [How it works](#how-it-works)
-4. [Repository layout](#repository-layout)
-5. [Build from source](#build-from-source)
-6. [Make a release](#make-a-release)
-7. [Credits and forks](#credits-and-forks)
-8. [License](#license)
+2. [Play it (Windows launcher)](#play-it-windows-launcher)
+3. [Native Linux / NixOS: host and join](#native-linux--nixos-host-and-join)
+4. [How it works](#how-it-works)
+5. [Repository layout](#repository-layout)
+6. [Build from source](#build-from-source)
+7. [Make a release](#make-a-release)
+8. [Credits and forks](#credits-and-forks)
+9. [License](#license)
 
 ## What it does
 
@@ -96,10 +97,10 @@ expect rough edges and keep backups of your saves. New builds come out as GitHub
 - **Self-hosted.** One player's PC runs the co-op server (the team lobby, the teams' worlds,
   every game's co-op traffic) and a stand-in for the game's online services. No PlayStation
   Network, no community server, nothing in the cloud.
-- **Everything from Bloodborne PC**: 60 FPS and above, resolutions up to 4K, DLSS, FSR 3.1/4 and
+- **Everything from Bloodborne PC**: 60 FPS for co-op (higher rates outside co-op), resolutions up to 4K, DLSS, FSR 3.1/4 and
   XeSS upscaling, frame generation, HDR, ReShade, mouse and keyboard, gamepads.
 
-## Play it
+## Play it (Windows launcher)
 
 The illustrated version of this is the
 [install guide](https://bloodborne.seamlesscoop.dev/docs/install).
@@ -118,13 +119,122 @@ The illustrated version of this is the
    and the leader begins the hunt. Later, the **Insert** menu's **Co-op Team** tab joins or invites
    from inside the game.
 5. Everyone must reach the host's PC: the same VPN (Radmin VPN, Tailscale, ZeroTier) or the host's
-   public IP with ports forwarded: TCP 31313, 31315, 20443 and **UDP 31314**. The UDP port carries
-   every game's co-op traffic (the games never talk to each other directly), so it must be open.
+   public IP with **31314/udp, 31315/tcp and 20443/tcp** forwarded. The UDP port carries every
+   game's co-op traffic (the games never talk to each other directly), so it must be open. Leave
+   **31313/tcp local** (`TcpLocalOnly=true`); the games' TCP sign-in travels through the UDP link.
    New to VPNs? The [Radmin VPN guide](https://bloodborne.seamlesscoop.dev/docs/radmin) walks through it.
 
-Requirements: Windows 10 (1903 or later) or 11, 64-bit, and a Vulkan 1.3 graphics card with a
-current driver. Everything else is in the setup. Tested with CUSA03173 (the European Game of the
-Year edition) at 1.09; all players in a party should use the same edition.
+Windows launcher requirements: Windows 10 (1903 or later) or 11, 64-bit, and a Vulkan 1.3
+graphics card with a current driver. Everything else is in the setup. Tested with CUSA03173
+(the European Game of the Year edition) at 1.09; all players in a party should use the same edition.
+
+## Native Linux / NixOS: host and join
+
+Use **this checkout**, not a separate `../bbport` build. Its root `shell.nix` includes the
+in-repository `bbport/shell.nix` plus the server's Qt dependencies; no Wine, Proton, global
+packages or external co-op website are required. Supply your own Bloodborne **1.09** game folder
+(containing `eboot.bin`). All commands below run from the root of this repository. Use a nixpkgs
+with Qt **6.8+**; if your default `<nixpkgs>` is older, enter the shell with
+`nix-shell -I nixpkgs=https://github.com/NixOS/nixpkgs/archive/nixos-unstable.tar.gz shell.nix`.
+
+**1. Prepare and build** (on the host and each NixOS client):
+
+```sh
+git submodule update --init bbport/gpu/third_party/fsr-vulkan \
+  bbport/gpu/third_party/imgui bbport/gpu/third_party/magic_enum \
+  bbport/gpu/third_party/miniz bbport/gpu/third_party/xbyak \
+  bbport/third_party/LibAtrac9 server/externals/protobuf
+nix-shell shell.nix
+BB_LTO=OFF BB_PGO=off bash bbport/build.sh
+```
+
+Only the **host** needs the server build, in that same Nix shell:
+
+```sh
+cmake -S server -B server/build-linux -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+cmake --build server/build-linux --target shadnet -j 2
+```
+
+**2. Start the server on the host**, in its own terminal inside `nix-shell shell.nix`:
+
+```sh
+mkdir -p "$PWD/local-data/server"
+SHADNET_HOME="$PWD/local-data/server" server/build-linux/shadnet
+```
+
+On the first start, stop it with Ctrl+C and edit
+`local-data/server/shadnet.cfg`: set `Host=0.0.0.0` to listen on the host's network
+interfaces (the default `Host=127.0.0.1` accepts local players only), set
+`BloodborneSeamlessCoop=true`, and leave `BloodborneBackend=true`, `Matching2Enabled=true`,
+`MakeAccountsAtSignIn=true` and `TcpLocalOnly=true`. Then run the server command again and leave
+it running. Keep its data directory, especially `link_key.bin` (clients pin the server's key).
+If you already have server data elsewhere, stop the server and copy its **whole** data directory
+into `local-data/server` before starting it here; do not create a new key or database by mistake.
+
+**3. Start the game on the host**, in a second terminal inside `nix-shell shell.nix`:
+
+```sh
+BB_PARTY_HUD=0 python3 bbport/scripts/linux_coop.py \
+  --game-dir /path/to/Bloodborne/game \
+  --server 127.0.0.1 \
+  --data-dir "$PWD/local-data/client"
+```
+
+Replace `--game-dir` with the location of **your** existing 1.09 game. `BB_PARTY_HUD=0` is a
+temporary workaround for blinking placeholder icons/text in the generated party HUD; it does not
+disable the server link. Native co-op intentionally runs at a fixed **60 FPS**. The script keeps
+identities, generated event edits, logs and saves under `local-data/client/`, separately from
+the original game. `local-data/` is ignored by Git but remains on disk in your clone. Keep the
+same directory on every launch so your identity and saves persist.
+
+**Bring an existing save:** with the game stopped, find the actual title-ID directory in your
+old `bbport/user/savedata/1/` (for the tested game and save it is `CUSA00207`, even though this
+game's `param.sfo` says `CUSA03173`). Copy the **whole** title-ID directory, including both
+`SPRJ0005/` and its adjacent `SPRJ0005.sce_sys/`, into the new profile:
+
+```sh
+old=/path/to/old/bbport/user/savedata/1/CUSA00207
+new="$PWD/local-data/client/user/savedata/1/CUSA00207"
+mkdir -p "$(dirname "$new")"
+test ! -e "$new" || { echo "Destination already exists; back it up before importing" >&2; false; }
+cp -a -- "$old" "$new"
+```
+
+Use the title ID found in **your** save for both paths; if the new profile already has a save,
+back it up first rather than overwriting it. The old files stay untouched. Never share a save
+or an identity file as part of the Git checkout.
+
+**4. Friends join:** each friend builds a compatible client from the same checkout/release, uses
+their **own game files and data directory**, and runs the same client command with
+`--server HOST_ADDRESS` instead of `127.0.0.1`. `HOST_ADDRESS` is the host's reachable VPN/LAN
+IPv4 address or DNS name, or the host's public address with the ports below forwarded. Friends
+do **not** run another server. If a friend uses Windows, use the Windows build instructions below
+instead of `nix-shell`; both clients still need a compatible co-op build.
+
+```sh
+BB_PARTY_HUD=0 python3 bbport/scripts/linux_coop.py \
+  --game-dir /path/to/friends/Bloodborne/game \
+  --server HOST_ADDRESS \
+  --data-dir "$PWD/local-data/client"
+```
+
+**Accounts are automatic:** on first launch the Linux script generates a private identity for
+that server in `user/coop-linux.json` under each player's data directory. With the default
+`MakeAccountsAtSignIn=true`, the server creates that account when the game signs in. There is no
+manual account-creation step or password to send to friends. **Never share `coop-linux.json`**;
+keep the same data directory on future launches to retain the same identity and saves. To invite
+or join a team, use the in-game team screen or **Insert → Co-op Team** (L3 + R3 also opens the menu).
+
+**Network:** allow inbound **31314/udp** (encrypted game/server link), **31315/tcp** (WebAPI)
+and **20443/tcp** (the game's HTTP backend) on the host's firewall. For play over the public
+internet, forward those three ports from the router to the host's LAN IP; on a VPN, allow them
+over the VPN instead. Do **not** forward **31313/tcp**: it is bound to loopback by default and
+is only used by the server-side link tunnel. Ports 31315 and 20443 use plain HTTP, so prefer a
+trusted VPN or restrict firewall access to your friends' addresses when possible. Check that
+your friends can reach the host and that the clients have compatible versions; a local launch
+alone is not proof of two-player co-op.
+
+For additional troubleshooting, server-key pinning and save-layout notes, see [docs/linux.md](docs/linux.md).
 
 ## How it works
 
@@ -190,7 +300,8 @@ port and shadPS4 players cannot be in one party.
 
 ## Build from source
 
-Windows only for now. Prerequisites:
+For the Windows build, prerequisites are listed below; see [Native Linux / NixOS: host and join](#native-linux--nixos-host-and-join)
+for the native NixOS build:
 
 - the port: [MSYS2](https://www.msys2.org) with the CLANG64 packages listed in
   [bbport/packaging/windows/README.md](bbport/packaging/windows/README.md), and a python.org
