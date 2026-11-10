@@ -497,6 +497,7 @@ target_link_libraries(test-log PUBLIC fmt::fmt)
 add_executable(coop-hooks-test EXCLUDE_FROM_ALL ../tests/test_coop_hooks.cpp bbcoop/guest_hooks.cpp
     ${BB_EMULATOR_SRC}/core/guest_hook.cpp shadps4/common/decoder.cpp)
 target_include_directories(coop-hooks-test PRIVATE shim shadps4 third_party/xbyak ${BB_EMULATOR_SRC})
+target_compile_definitions(coop-hooks-test PRIVATE BLOODBORNE_NATIVE_PORT=1)
 target_compile_options(coop-hooks-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_link_libraries(coop-hooks-test PRIVATE test-log Zydis::Zydis)
 # The PC memory model's hooks in the game's code (bbport_guest_hooks.cpp), on functions the test

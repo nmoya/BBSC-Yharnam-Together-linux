@@ -174,7 +174,7 @@ into `local-data/server` before starting it here; do not create a new key or dat
 **3. Start the game on the host**, in a second terminal inside `nix-shell shell.nix`:
 
 ```sh
-BB_PARTY_HUD=0 python3 bbport/scripts/linux_coop.py \
+BB_PARTY_HUD=0 BB_PATCHES='Skip Intro' python3 bbport/scripts/linux_coop.py \
   --game-dir /path/to/Bloodborne/game \
   --server 127.0.0.1 \
   --data-dir "$PWD/local-data/client"
@@ -212,7 +212,7 @@ do **not** run another server. If a friend uses Windows, use the Windows build i
 instead of `nix-shell`; both clients still need a compatible co-op build.
 
 ```sh
-BB_PARTY_HUD=0 python3 bbport/scripts/linux_coop.py \
+BB_PARTY_HUD=0 BB_PATCHES='Skip Intro' python3 bbport/scripts/linux_coop.py \
   --game-dir /path/to/friends/Bloodborne/game \
   --server HOST_ADDRESS \
   --data-dir "$PWD/local-data/client"

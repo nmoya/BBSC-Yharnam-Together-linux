@@ -9,6 +9,7 @@
 #include <memory>
 #include <mutex>
 #include <vector>
+#define Xbyak BloodborneNativeXbyak
 #include <xbyak/xbyak.h>
 #ifdef _WIN32
 #include <windows.h>

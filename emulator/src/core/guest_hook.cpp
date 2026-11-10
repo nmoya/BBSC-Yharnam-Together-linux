@@ -4,6 +4,11 @@
 #include <array>
 #include <cstddef>
 #include <Zydis/Zydis.h>
+#ifdef BLOODBORNE_NATIVE_PORT
+// libbbgpu contains other Xbyak users whose inline class symbols may have a different layout.
+// Keep the native co-op generator's symbols separate from theirs.
+#define Xbyak BloodborneNativeXbyak
+#endif
 #include <xbyak/xbyak.h>
 #include "common/alignment.h"
 #include "common/decoder.h"
