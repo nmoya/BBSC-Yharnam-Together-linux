@@ -180,10 +180,10 @@ void GiveItem(std::uint32_t category, std::uint32_t id, std::int32_t quantity) {
         if (!InWorld() || quantity == 0) {
             return;
         }
-        // Kaniel's playtest 2026-10-16: a weapon given silently showed nothing. Items of their
-        // own (weapons, armor) go as trading's do: as a pickup, with the game's popup.
-        if (category != GoodsCategory && quantity > 0 &&
-            bbcoop_give_own_item(category | id, static_cast<std::uint32_t>(quantity))) {
+        // The old silent give at 0x131cb70 can create a pickup that awards nothing. Use trading's
+        // known pickup path for goods too; it also sends amounts over the carry limit to storage.
+        if (quantity > 0 &&
+            bbcoop_give_item(category | id, static_cast<std::uint32_t>(quantity))) {
             std::printf("Save editor: gave item %#x:%u x%d as a pickup\n", category, id,
                         quantity);
             return;

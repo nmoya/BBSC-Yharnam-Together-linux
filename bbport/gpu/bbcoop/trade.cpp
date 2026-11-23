@@ -48,13 +48,23 @@ std::string NameOf(const TradeItem& item) {
 
 extern "C" {
 
-int bbcoop_give_own_item(uint32_t item_id, uint32_t count) {
+int bbcoop_give_item(uint32_t item_id, uint32_t count) {
     if (!TradeItemsCanBeAdded() || count == 0) {
         return 0;
+    }
+    if ((item_id & 0xF0000000) == BloodborneCoop::GoodsCategory) {
+        TradeItems items{
+            TradeItem{TradeItemKind::Goods, item_id & 0x0FFFFFFF, count}};
+        AddTradeItems(items);
+        return 1;
     }
     TradeItems items(std::min<uint32_t>(count, 20), TradeItem{TradeItemKind::Item, item_id, 1});
     AddTradeItems(items);
     return 1;
+}
+
+int bbcoop_give_own_item(uint32_t item_id, uint32_t count) {
+    return bbcoop_give_item(item_id, count);
 }
 
 int bbcoop_trade_on(void) {
