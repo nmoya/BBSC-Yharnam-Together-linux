@@ -46,6 +46,10 @@ void SetTextPrompt(bool active, const std::string& prompt, const std::string& te
 /// Window thread, once per poll: a held L3+R3 opens the quit box after 1.5 s.
 void Tick();
 
+/// Any game thread: opens the same confirmation box as the overlay's Quit row. Used by the
+/// native title menu's Quit to desktop entry.
+void RequestQuit();
+
 /// Window thread, test knob: BB_TEST_OVERLAY_AT=<seconds>[,<seconds>...] toggles the menu that many
 /// seconds after the first call, so a harness run can open and close it without sending input.
 void TestTick();

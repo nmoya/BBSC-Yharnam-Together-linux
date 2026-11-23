@@ -8300,6 +8300,11 @@ bool CapturesInput() {
     return BbOverlayInput::HoldsGame(OpenScreens());
 }
 
+void RequestQuit() {
+    menu_open = false;
+    quit_open = true;
+}
+
 void Tick() {
     std::scoped_lock lock{imgui_mutex};
     if (initialized && combo_held && !combo_fired &&

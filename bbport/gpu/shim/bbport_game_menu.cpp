@@ -23,6 +23,7 @@
 
 #include "../bbcoop.h"
 #include "bbport_game_art.h"
+#include "bbport_overlay.h"
 #include "bbport_settings.h"
 #include "bbport_trade_menu.h"
 
@@ -70,6 +71,7 @@ constexpr u64 ControlsLayout = 0x4934065; ///< "ControllSetting": six plain rows
 constexpr u32 TextName = 0xc8, TextHelp = 0xc9; // SP_menu text / SP_one-line help
 constexpr u32 ScreenSoundItem = 110001;         // "Screen/Sound" in the System menu: ours follow it
 constexpr u32 ControlsTitle = 113020;           // the ControllSetting layout's title ("Controls")
+constexpr u32 TitleQuitItem = 401307;            // hidden "Opinion Box" item in the title menu
 constexpr std::size_t RowsPerPage = 6;          // ControllSetting's rows
 
 const u8 MsgLookupPrologue[] = {0x89, 0xf0, 0x48, 0x8b, 0x77, 0x08, 0x48, 0x8b, 0x34, 0xc6};
@@ -87,6 +89,7 @@ struct Text {
     std::u16string by_language[BbSettings::MenuLanguageCount];
 };
 std::vector<Text> texts;
+u32 title_quit_name = 0, title_quit_help = 0;
 
 std::u16string Utf16(const char* utf8) {
     std::u16string out;
@@ -786,6 +789,14 @@ GAME_ABI const char16_t* LookupHook(void* repository, u32 table, u32 category, u
     if (title_override && category == TextName && id == ControlsTitle) {
         return title_override;
     }
+    if (id == TitleQuitItem) {
+        if (category == TextName) {
+            return TextOf(title_quit_name);
+        }
+        if (category == TextHelp) {
+            return TextOf(title_quit_help);
+        }
+    }
     const char16_t* text = lookup_original(repository, table, category, id);
     static const bool trace = [] {
         const char* env = std::getenv("BB_GAME_MENU_TRACE");
@@ -899,6 +910,61 @@ bool Detour(unsigned char* image, u64 va, const u8* prologue, std::size_t length
     return true;
 }
 
+// The console title menu retains FromSoftware's hidden "Opinion Box" entry. Make its condition
+// true, replace its text through LookupHook, and turn its callback into the port's quit question.
+// The list normally displays five rows and scrolls to this sixth one.
+constexpr u64 TitleCondition = 0x1b4abf3;
+constexpr u64 OpinionInvoke = 0x1b46030;
+constexpr u64 OpinionSlot = 0x533b960;
+const u8 TitleConditionCode[] = {0xe8, 0xc8, 0xee, 0xf9, 0xff};
+
+using OpinionFn = void* (GAME_ABI *)(void*, void*);
+OpinionFn opinion_original = nullptr;
+
+GAME_ABI bool TitleConditionHook() {
+    return true;
+}
+
+GAME_ABI void* TitleQuitHook(void* first, void* second) {
+    BbOverlay::RequestQuit();
+    return opinion_original(first, second);
+}
+
+bool PatchTitleQuit(unsigned char* image, u64 size, u8*& cursor) {
+    if (size < OpinionSlot + sizeof(void*)) {
+        std::printf("Game menu: image is too small for the title Quit entry\n");
+        return false;
+    }
+    u8* condition = image + TitleCondition;
+    void** slot = reinterpret_cast<void**>(image + OpinionSlot);
+    void* expected_invoke = image + OpinionInvoke;
+    if (std::memcmp(condition, TitleConditionCode, sizeof(TitleConditionCode)) != 0 ||
+        *slot != expected_invoke) {
+        std::printf("Game menu: unexpected title menu code, Quit to desktop is off\n");
+        return false;
+    }
+
+    // The call instruction can only reach +-2 GiB. A small nearby thunk reaches the host hook.
+    void* hook = reinterpret_cast<void*>(&TitleConditionHook);
+    cursor[0] = 0x48;
+    cursor[1] = 0xb8; // movabs rax, hook
+    std::memcpy(cursor + 2, &hook, sizeof(hook));
+    cursor[10] = 0xff;
+    cursor[11] = 0xe0; // jmp rax
+    const std::int64_t relative = std::int64_t(cursor) - std::int64_t(condition + 5);
+    if (relative != std::int32_t(relative)) {
+        std::printf("Game menu: title Quit thunk out of range\n");
+        return false;
+    }
+    const std::int32_t relative32 = std::int32_t(relative);
+    condition[0] = 0xe8;
+    std::memcpy(condition + 1, &relative32, sizeof(relative32));
+    opinion_original = reinterpret_cast<OpinionFn>(expected_invoke);
+    *slot = reinterpret_cast<void*>(&TitleQuitHook);
+    cursor += 16;
+    return true;
+}
+
 /// A mapping within +-2 GiB of the image, for rel32 jumps both ways.
 u8* MapNear(unsigned char* image, u64 image_size, std::size_t size) {
     const u64 base = reinterpret_cast<u64>(image);
@@ -964,6 +1030,8 @@ void PatchImage(unsigned char* image, std::uint64_t size) {
         return;
     }
     DefineTexts();
+    title_quit_name = AddText("Quit to desktop", "Выйти на рабочий стол");
+    title_quit_help = AddText("Close the game.", "Закрыть игру.");
     team_page_name = AddText("Co-op Team", "Кооп-команда");
     team_page_help = AddText("Your team: invite hunters, remove a member, leave, or join the hunt",
                              "Ваша команда: пригласить охотников, исключить, покинуть или вступить в охоту");
@@ -1000,6 +1068,7 @@ void PatchImage(unsigned char* image, std::uint64_t size) {
                reinterpret_cast<void*>(&LookupHook), reinterpret_cast<void**>(&lookup_original), cursor) &&
         Detour(image, AddPageItem, AddPageItemPrologue, sizeof(AddPageItemPrologue),
                reinterpret_cast<void*>(&AddHook), reinterpret_cast<void**>(&add_original), cursor);
+    const bool title_quit = ok && PatchTitleQuit(image, size, cursor);
     // Trading's menus (their texts go through the lookup hook too).
     if (ok) {
         BbTradeMenu::PatchImage(image, size, cursor);
@@ -1011,8 +1080,9 @@ void PatchImage(unsigned char* image, std::uint64_t size) {
 #else
     mprotect(stubs, page, PROT_READ | PROT_EXEC);
 #endif
-    std::printf("Game menu: %s (%zu pages in System)\n", ok ? "the port's pages are in" : "hooks failed, off",
-                pages.size());
+    std::printf("Game menu: %s (%zu pages in System; title Quit %s)\n",
+                ok ? "the port's pages are in" : "hooks failed, off", pages.size(),
+                title_quit ? "in" : "off");
 }
 
 
